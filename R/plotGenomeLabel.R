@@ -420,47 +420,101 @@ plotChromGenomeLabel <- function(genomeLabel,
     # =========================================================================
     
     ## Define a function that adds commas to chromstart/chromend labels
-    comma_labels <- function(object, commas, fact, ...) {
-        digits <- list(...)$digits
-        if (is.null(digits)){
-            if (fact == 1){
-                digits <- rep(0, 2)
-            } else {
-                digits <- rep(1, 2)
-            }
-        }
-        if (length(digits) == 1){
-            digits <- rep(digits, 2)
-        }
-        
-        roundedStart <- round(object$chromstart / fact, digits[1])
-        if ((roundedStart * fact) != object$chromstart) {
-            roundedStart <- paste0("~", roundedStart)
-            warning("Start label is rounded.", call. = FALSE)
-        }
-        
-        roundedEnd <- round(object$chromend / fact, digits[2])
-        if ((roundedEnd * fact) != object$chromend) {
-            roundedEnd <- paste0("~", roundedEnd)
-            warning("End label is rounded.", call. = FALSE)
-        }
-
-        if (commas == TRUE) {
-            chromstartlabel <- formatC(roundedStart,
-                                    format = "f",
-                                    big.mark = ",", digits = digits[1]
-            )
-            chromendlabel <- formatC(roundedEnd,
-                                    format = "f",
-                                    big.mark = ",", digits = digits[2]
-            )
-        } else {
-            chromstartlabel <- roundedStart
-            chromendlabel <- roundedEnd
-        }
-        
-        return(list(chromstartlabel, chromendlabel))
+  comma_labels <- function(object, commas, fact, ...) {
+    
+    # ---- error if bp inputs are not whole numbers ----
+    is_whole_number <- function(x) {
+      is.numeric(x) && length(x) == 1 && is.finite(x) && abs(x - round(x)) < .Machine$double.eps^0.5
     }
+    if (!is_whole_number(object$chromstart)) {
+      stop("`chromstart` must be an integer number of basepairs (no decimals).",
+           call. = FALSE)
+    }
+    if (!is_whole_number(object$chromend)) {
+      stop("`chromend` must be an integer number of basepairs (no decimals).",
+           call. = FALSE)
+    }
+    
+    dots <- list(...)
+    digits_provided <- "digits" %in% names(dots)
+    
+    # helper: exact decimal string from integer bp and power-of-10 fact
+    # trims trailing zeros and removes the decimal point if nothing remains
+    exact_scaled_label <- function(bp, fact, commas) {
+      
+      bp <- as.integer(round(bp))
+      
+      if (fact == 1) {
+        whole <- bp
+        frac_str <- NULL
+      } else {
+        k <- as.integer(round(log10(fact)))  # 3 for Kb, 6 for Mb
+        whole <- bp %/% fact
+        frac  <- bp %% fact
+        
+        if (frac == 0) {
+          frac_str <- NULL
+        } else {
+          frac_str <- sprintf(paste0("%0", k, "d"), frac)
+          frac_str <- sub("0+$", "", frac_str)  # truncate trailing zeros
+          if (identical(frac_str, "")) frac_str <- NULL
+        }
+      }
+      
+      whole_str <- as.character(whole)
+      if (commas) {
+        whole_str <- prettyNum(whole_str, big.mark = ",", scientific = FALSE)
+      }
+      
+      if (is.null(frac_str)) whole_str else paste0(whole_str, ".", frac_str)
+    }
+    
+    # helper: format a rounded numeric with requested digits, but truncate zeros
+    format_trimmed <- function(x, d, commas) {
+      s <- formatC(x, format = "f", digits = d, drop0trailing = TRUE)
+      if (commas) {
+        parts <- strsplit(s, "\\.", fixed = FALSE)[[1]]
+        parts[1] <- prettyNum(parts[1], big.mark = ",", scientific = FALSE)
+        s <- paste(parts, collapse = ".")
+      }
+      s
+    }
+    
+    # ---- Case 1: user did NOT request digits -> no rounding, exact display ----
+    if (!digits_provided) {
+      start_label <- exact_scaled_label(object$chromstart, fact, commas)
+      end_label   <- exact_scaled_label(object$chromend,   fact, commas)
+      return(list(start_label, end_label))
+    }
+    
+    # ---- Case 2: user requested digits -> round, add ~ if changed ----
+    digits <- dots$digits
+    if (!is.numeric(digits) || any(!is.finite(digits)) || any(digits < 0) || any(digits %% 1 != 0)) {
+      stop("`digits` must be a non-negative integer (or length-2 integer vector).",
+           call. = FALSE)
+    }
+    if (length(digits) == 1) digits <- rep(digits, 2)
+    
+    start_scaled <- as.integer(round(object$chromstart)) / fact
+    end_scaled   <- as.integer(round(object$chromend))   / fact
+    
+    roundedStart <- round(start_scaled, digits[1])
+    roundedEnd   <- round(end_scaled,   digits[2])
+    
+    start_changed <- abs((roundedStart * fact) - object$chromstart) > .Machine$double.eps^0.5
+    end_changed   <- abs((roundedEnd   * fact) - object$chromend)   > .Machine$double.eps^0.5
+    
+    start_label <- format_trimmed(roundedStart, digits[1], commas)
+    end_label   <- format_trimmed(roundedEnd,   digits[2], commas)
+    
+    if (start_changed) start_label <- paste0("~", start_label)
+    if (end_changed)   end_label   <- paste0("~", end_label)
+    
+    return(list(start_label, end_label))
+  }
+  
+  
+  
     
     ## Define a function that makes the label viewport
     chrom_viewport <- function(object, length, depth, seqType,
